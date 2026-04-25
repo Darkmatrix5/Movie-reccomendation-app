@@ -1,32 +1,51 @@
 import pickle
+from pathlib import Path
 import streamlit as st
 import requests
 
+FALLBACK_POSTER = "https://via.placeholder.com/500x750?text=No+Poster"
+
 def fetch_poster(movie_id):
     url = "https://api.themoviedb.org/3/movie/{}?api_key=8265bd1679663a7ea12ac168da84d2e8&language=en-US".format(movie_id)
-    data = requests.get(url)
-    data = data.json()
-    poster_path = data['poster_path']
-    full_path = "https://image.tmdb.org/t/p/w500/" + poster_path
-    return full_path
+    try:
+        data = requests.get(url, timeout=10).json()
+        poster_path = data.get("poster_path")
+        if not poster_path:
+            return FALLBACK_POSTER
+        return "https://image.tmdb.org/t/p/w500/" + poster_path
+    except requests.RequestException:
+        return FALLBACK_POSTER
 
 def recommend(movie):
     index = movies[movies['title'] == movie].index[0]
-    distances = sorted(list(enumerate(similarity[index])), reverse=True, key=lambda x: x[1])
+    distances = similarity[index]
     recommended_movie_names = []
     recommended_movie_posters = []
-    for i in distances[1:6]:
+    for neighbor_idx, _score in distances[:5]:
         # fetch the movie poster
-        movie_id = movies.iloc[i[0]].movie_id
+        movie_id = movies.iloc[neighbor_idx].movie_id
         recommended_movie_posters.append(fetch_poster(movie_id))
-        recommended_movie_names.append(movies.iloc[i[0]].title)
+        recommended_movie_names.append(movies.iloc[neighbor_idx].title)
 
     return recommended_movie_names,recommended_movie_posters
 
 
 st.header('Movie Recommender System')
-movies = pickle.load(open('model/movie_list.pkl','rb'))
-similarity = pickle.load(open('model/similarity.pkl','rb'))
+
+def load_pickle(filename):
+    base_dir = Path(__file__).resolve().parent
+    candidates = [base_dir / "model" / filename, base_dir / filename]
+    for path in candidates:
+        if path.exists():
+            with open(path, "rb") as f:
+                return pickle.load(f)
+    raise FileNotFoundError(
+        f"{filename} not found. Checked: {candidates[0]} and {candidates[1]}"
+    )
+
+
+movies = load_pickle("movie_list.pkl")
+similarity = load_pickle("similarity.pkl")
 
 movie_list = movies['title'].values
 selected_movie = st.selectbox(
@@ -36,7 +55,7 @@ selected_movie = st.selectbox(
 
 if st.button('Show Recommendation'):
     recommended_movie_names,recommended_movie_posters = recommend(selected_movie)
-    col1, col2, col3, col4, col5 = st.beta_columns(5)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.text(recommended_movie_names[0])
         st.image(recommended_movie_posters[0])
